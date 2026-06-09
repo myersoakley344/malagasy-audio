@@ -40,7 +40,8 @@
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNvYWl6bnJ4dHBkcWF0dmZic3lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMDUwMzUsImV4cCI6MjA5NjU4MTAzNX0.Si9OSFc97KrG3x8obbWFfSPgE5C4rRYXwZ9J7sSdT-o';
         // -----------------------------------
 
-        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        // FIX: Renamed variable to avoid conflict with the global "supabase" object
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
         async function login() {
             const code = document.getElementById('access-code').value.trim();
@@ -50,7 +51,7 @@
             const email = code + "@malagasy.local";
             const password = code;
 
-            const { data, error } = await supabase.auth.signInWithPassword({
+            const { data, error } = await supabaseClient.auth.signInWithPassword({
                 email: email,
                 password: password
             });
@@ -69,7 +70,7 @@
 
         async function fetchWord() {
             // Fetch one word from the database
-            const { data, error } = await supabase
+            const { data, error } = await supabaseClient
                 .from('words')
                 .select('word_text')
                 .limit(1);
@@ -88,7 +89,7 @@
         }
 
         async function logout() {
-            await supabase.auth.signOut();
+            await supabaseClient.auth.signOut();
             document.getElementById('login-screen').classList.remove('hidden');
             document.getElementById('app-screen').classList.add('hidden');
             document.getElementById('access-code').value = '';
