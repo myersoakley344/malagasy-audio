@@ -3,15 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enregistrement Audio</title>
-    <!-- Use Supabase from a CDN for low-bandwidth, no-build setups -->
+    <title>Enregistrement Audio Malgache</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        body { font-family: sans-serif; padding: 20px; max-width: 500px; margin: 0 auto; }
-        .hidden { display: none; }
-        input, button { padding: 10px; font-size: 16px; width: 100%; margin-top: 10px; box-sizing: border-box; }
-        button { background-color: #007bff; color: white; border: none; border-radius: 5px; }
-        .error { color: red; margin-top: 10px; }
+        body { font-family: sans-serif; padding: 15px; max-width: 500px; margin: 0 auto; line-height: 1.5; }
+        .hidden { display: none !important; }
+        input, button { padding: 15px; font-size: 16px; width: 100%; margin-top: 10px; box-sizing: border-box; border-radius: 8px; }
+        button { cursor: pointer; font-weight: bold; border: none; }
+        .btn-blue { background-color: #007bff; color: white; }
+        .btn-red { background-color: #dc3545; color: white; }
+        .btn-green { background-color: #28a745; color: white; }
+        .btn-gray { background-color: #6c757d; color: white; }
+        .error { color: red; margin-top: 10px; font-weight: bold; }
+
+        .recording-section { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ddd; }
+        .word-display { font-size: 2.5em; background: #e9ecef; padding: 20px; text-align: center; border-radius: 8px; margin-bottom: 20px; font-weight: bold;}
+        audio { width: 100%; margin-top: 10px; }
+        .status-dot { height: 12px; width: 12px; background-color: red; border-radius: 50%; display: inline-block; animation: blink 1s infinite; margin-right: 5px; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
@@ -19,80 +28,235 @@
     <!-- Login Screen -->
     <div id="login-screen">
         <h2>Entrez votre code d'accès</h2>
-        <p><i>(Enter your access code)</i></p>
         <input type="text" id="access-code" placeholder="Code (ex: test)">
-        <button onclick="login()">Valider (Submit)</button>
+        <button class="btn-blue" onclick="login()">Valider</button>
         <div id="error-msg" class="error hidden"></div>
     </div>
 
     <!-- App Screen -->
     <div id="app-screen" class="hidden">
-        <h2 style="color: green;">Connexion réussie ! (Connected successfully!)</h2>
-        <h3>Mot à enregistrer (Word to record):</h3>
-        <h1 id="word-display" style="font-size: 2em; background: #eee; padding: 20px; text-align: center;">Chargement... (Loading...)</h1>
+        <p style="text-align: right; margin: 0;"><button onclick="logout()" style="width: auto; padding: 5px 10px; background: transparent; color: #dc3545; border: 1px solid #dc3545;">Se déconnecter (Logout)</button></p>
 
-        <p><button onclick="logout()" style="background-color: #dc3545;">Se déconnecter (Logout)</button></p>
+        <h3>Mot à enregistrer :</h3>
+        <div id="word-display" class="word-display">Chargement...</div>
+
+        <!-- Slow Recording Section -->
+        <div class="recording-section">
+            <h3 style="margin-top: 0; color: #333;">1. Lent (Slow & Perfect)</h3>
+            <p style="font-size: 14px; margin-top: 0;">Prononcez très lentement et parfaitement.</p>
+
+            <div id="slow-status" class="hidden" style="color: red; font-weight: bold; margin-bottom: 10px;">
+                <span class="status-dot"></span> Enregistrement en cours...
+            </div>
+
+            <button id="btn-record-slow" class="btn-red" onclick="startRecording('slow')">⏺ Commencer (Record)</button>
+            <button id="btn-stop-slow" class="btn-gray hidden" onclick="stopRecording('slow')">⏹ Arrêter (Stop)</button>
+
+            <audio id="audio-slow" controls class="hidden"></audio>
+        </div>
+
+        <!-- Natural Recording Section -->
+        <div class="recording-section">
+            <h3 style="margin-top: 0; color: #333;">2. Naturel (Normal Speed)</h3>
+            <p style="font-size: 14px; margin-top: 0;">Prononcez normalement, comme dans la vraie vie.</p>
+
+            <div id="natural-status" class="hidden" style="color: red; font-weight: bold; margin-bottom: 10px;">
+                <span class="status-dot"></span> Enregistrement en cours...
+            </div>
+
+            <button id="btn-record-natural" class="btn-red" onclick="startRecording('natural')">⏺ Commencer (Record)</button>
+            <button id="btn-stop-natural" class="btn-gray hidden" onclick="stopRecording('natural')">⏹ Arrêter (Stop)</button>
+
+            <audio id="audio-natural" controls class="hidden"></audio>
+        </div>
+
+        <button id="btn-submit" class="btn-green hidden" onclick="submitRecordings()">✅ Envoyer et Suivant (Submit)</button>
+        <div id="upload-status" style="text-align: center; margin-top: 10px; font-weight: bold;"></div>
+    </div>
+
+    <!-- Done Screen -->
+    <div id="done-screen" class="hidden" style="text-align: center; margin-top: 50px;">
+        <h2>Félicitations ! 🎉</h2>
+        <p>Il n'y a plus de mots à enregistrer pour le moment.</p>
+        <p>(No more words left for now.)</p>
+        <button class="btn-gray" onclick="logout()">Se déconnecter</button>
     </div>
 
     <script>
-        // --- PUT YOUR SUPABASE KEYS HERE ---
+        // --- YOUR SUPABASE KEYS ---
         const SUPABASE_URL = 'https://coaiznrxtpdqatvfbsyi.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNvYWl6bnJ4dHBkcWF0dmZic3lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMDUwMzUsImV4cCI6MjA5NjU4MTAzNX0.Si9OSFc97KrG3x8obbWFfSPgE5C4rRYXwZ9J7sSdT-o';
-        // -----------------------------------
-
-        // FIX: Renamed variable to avoid conflict with the global "supabase" object
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+        // --- APP STATE ---
+        let currentWordRow = null;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let recordings = { slow: null, natural: null };
+
+        // --- AUTH LOGIC ---
         async function login() {
             const code = document.getElementById('access-code').value.trim();
             const errorMsg = document.getElementById('error-msg');
-
-            // Reconstruct the fake email: "test" becomes "test@malagasy.local"
-            const email = code + "@malagasy.local";
-            const password = code;
-
-            const { data, error } = await supabaseClient.auth.signInWithPassword({
-                email: email,
-                password: password
+            const { error } = await supabaseClient.auth.signInWithPassword({
+                email: code + "@malagasy.local",
+                password: code
             });
 
             if (error) {
-                errorMsg.innerText = "Code incorrect. / Incorrect code.";
+                errorMsg.innerText = "Code incorrect.";
                 errorMsg.classList.remove('hidden');
-                console.error(error);
             } else {
-                // Success! Switch screens and fetch words.
                 document.getElementById('login-screen').classList.add('hidden');
                 document.getElementById('app-screen').classList.remove('hidden');
-                fetchWord();
-            }
-        }
-
-        async function fetchWord() {
-            // Fetch one word from the database
-            const { data, error } = await supabaseClient
-                .from('words')
-                .select('word_text')
-                .limit(1);
-
-            if (error) {
-                document.getElementById('word-display').innerText = "Erreur de base de données (Database error)";
-                console.error(error);
-                return;
-            }
-
-            if (data && data.length > 0) {
-                document.getElementById('word-display').innerText = data[0].word_text;
-            } else {
-                document.getElementById('word-display').innerText = "Aucun mot trouvé (No words found)";
+                fetchNextWord();
             }
         }
 
         async function logout() {
             await supabaseClient.auth.signOut();
-            document.getElementById('login-screen').classList.remove('hidden');
-            document.getElementById('app-screen').classList.add('hidden');
-            document.getElementById('access-code').value = '';
+            location.reload(); // Refresh page to reset everything
+        }
+
+        // --- FETCH DATA LOGIC ---
+        async function fetchNextWord() {
+            document.getElementById('word-display').innerText = "Chargement...";
+            resetUI();
+
+            // Find one word that is NOT completed yet
+            const { data, error } = await supabaseClient
+                .from('words')
+                .select('*')
+                .eq('is_completed', false)
+                .order('id', { ascending: true })
+                .limit(1);
+
+            if (error) {
+                alert("Erreur de base de données.");
+                return;
+            }
+
+            if (data && data.length > 0) {
+                currentWordRow = data[0];
+                document.getElementById('word-display').innerText = currentWordRow.word_text;
+            } else {
+                // No more words left!
+                document.getElementById('app-screen').classList.add('hidden');
+                document.getElementById('done-screen').classList.remove('hidden');
+            }
+        }
+
+        // --- AUDIO COMPONENT LOGIC ---
+        async function startRecording(type) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    recordings[type] = audioBlob; // Save to our state
+
+                    // Show the audio player so they can listen to it
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audioElement = document.getElementById(`audio-${type}`);
+                    audioElement.src = audioUrl;
+                    audioElement.classList.remove('hidden');
+
+                    checkIfBothFinished();
+                };
+
+                mediaRecorder.start();
+
+                // UI Updates
+                document.getElementById(`btn-record-${type}`).classList.add('hidden');
+                document.getElementById(`btn-stop-${type}`).classList.remove('hidden');
+                document.getElementById(`${type}-status`).classList.remove('hidden');
+
+            } catch (err) {
+                alert("Erreur : impossible d'accéder au microphone. (Microphone error)");
+            }
+        }
+
+        function stopRecording(type) {
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+                mediaRecorder.stop();
+
+                // Stop using the microphone completely
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+
+                // UI Updates
+                document.getElementById(`btn-stop-${type}`).classList.add('hidden');
+                document.getElementById(`btn-record-${type}`).classList.remove('hidden');
+                document.getElementById(`btn-record-${type}`).innerText = "🔄 Re-enregistrer (Redo)";
+                document.getElementById(`${type}-status`).classList.add('hidden');
+            }
+        }
+
+        function checkIfBothFinished() {
+            if (recordings.slow && recordings.natural) {
+                document.getElementById('btn-submit').classList.remove('hidden');
+            }
+        }
+
+        function resetUI() {
+            recordings = { slow: null, natural: null };
+            ['slow', 'natural'].forEach(type => {
+                document.getElementById(`btn-record-${type}`).innerText = "⏺ Commencer (Record)";
+                document.getElementById(`btn-record-${type}`).classList.remove('hidden');
+                document.getElementById(`btn-stop-${type}`).classList.add('hidden');
+                document.getElementById(`audio-${type}`).classList.add('hidden');
+            });
+            document.getElementById('btn-submit').classList.add('hidden');
+            document.getElementById('upload-status').innerText = "";
+        }
+
+        // --- UPLOAD LOGIC ---
+        async function submitRecordings() {
+            const statusText = document.getElementById('upload-status');
+            const submitBtn = document.getElementById('btn-submit');
+
+            submitBtn.classList.add('hidden');
+            statusText.innerText = "Envoi en cours... (Uploading...)";
+
+            try {
+                // 1. Upload Slow Audio
+                const ext = 'webm'; // Mobile browsers generally record in webm or mp4
+                const slowFilename = `word_${currentWordRow.id}_slow_${Date.now()}.${ext}`;
+                const { error: err1 } = await supabaseClient.storage.from('recordings').upload(slowFilename, recordings.slow);
+                if (err1) throw err1;
+                const { data: dbSlow } = supabaseClient.storage.from('recordings').getPublicUrl(slowFilename);
+
+                // 2. Upload Natural Audio
+                const natFilename = `word_${currentWordRow.id}_natural_${Date.now()}.${ext}`;
+                const { error: err2 } = await supabaseClient.storage.from('recordings').upload(natFilename, recordings.natural);
+                if (err2) throw err2;
+                const { data: dbNat } = supabaseClient.storage.from('recordings').getPublicUrl(natFilename);
+
+                // 3. Update Database
+                const { error: dbErr } = await supabaseClient
+                    .from('words')
+                    .update({
+                        audio_slow: dbSlow.publicUrl,
+                        audio_natural: dbNat.publicUrl,
+                        is_completed: true
+                    })
+                    .eq('id', currentWordRow.id);
+
+                if (dbErr) throw dbErr;
+
+                // 4. Load Next Word
+                fetchNextWord();
+
+            } catch (error) {
+                console.error(error);
+                statusText.innerText = "Erreur pendant l'envoi. Veuillez réessayer.";
+                submitBtn.classList.remove('hidden');
+            }
         }
     </script>
 </body>
