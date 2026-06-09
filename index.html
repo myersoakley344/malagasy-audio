@@ -3,11 +3,96 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Projet Audio Malgache</title>
+    <title>Enregistrement Audio</title>
+    <!-- Use Supabase from a CDN for low-bandwidth, no-build setups -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; max-width: 500px; margin: 0 auto; }
+        .hidden { display: none; }
+        input, button { padding: 10px; font-size: 16px; width: 100%; margin-top: 10px; box-sizing: border-box; }
+        button { background-color: #007bff; color: white; border: none; border-radius: 5px; }
+        .error { color: red; margin-top: 10px; }
+    </style>
 </head>
 <body>
-    <h1>Bienvenue ! (Welcome!)</h1>
-    <p>Si vous voyez ceci, l'hébergement GitHub Pages fonctionne.</p>
-    <p>(If you see this, GitHub pages hosting is working.)</p>
+
+    <!-- Login Screen -->
+    <div id="login-screen">
+        <h2>Entrez votre code d'accès</h2>
+        <p><i>(Enter your access code)</i></p>
+        <input type="text" id="access-code" placeholder="Code (ex: test)">
+        <button onclick="login()">Valider (Submit)</button>
+        <div id="error-msg" class="error hidden"></div>
+    </div>
+
+    <!-- App Screen -->
+    <div id="app-screen" class="hidden">
+        <h2 style="color: green;">Connexion réussie ! (Connected successfully!)</h2>
+        <h3>Mot à enregistrer (Word to record):</h3>
+        <h1 id="word-display" style="font-size: 2em; background: #eee; padding: 20px; text-align: center;">Chargement... (Loading...)</h1>
+
+        <p><button onclick="logout()" style="background-color: #dc3545;">Se déconnecter (Logout)</button></p>
+    </div>
+
+    <script>
+        // --- PUT YOUR SUPABASE KEYS HERE ---
+        const SUPABASE_URL = 'https://YOUR-PROJECT-ID.supabase.co';
+        const SUPABASE_KEY = 'YOUR-ANON-KEY';
+        // -----------------------------------
+
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        async function login() {
+            const code = document.getElementById('access-code').value.trim();
+            const errorMsg = document.getElementById('error-msg');
+
+            // Reconstruct the fake email: "test" becomes "test@malagasy.local"
+            const email = code + "@malagasy.local";
+            const password = code;
+
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email: email,
+                password: password
+            });
+
+            if (error) {
+                errorMsg.innerText = "Code incorrect. / Incorrect code.";
+                errorMsg.classList.remove('hidden');
+                console.error(error);
+            } else {
+                // Success! Switch screens and fetch words.
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('app-screen').classList.remove('hidden');
+                fetchWord();
+            }
+        }
+
+        async function fetchWord() {
+            // Fetch one word from the database
+            const { data, error } = await supabase
+                .from('words')
+                .select('word_text')
+                .limit(1);
+
+            if (error) {
+                document.getElementById('word-display').innerText = "Erreur de base de données (Database error)";
+                console.error(error);
+                return;
+            }
+
+            if (data && data.length > 0) {
+                document.getElementById('word-display').innerText = data[0].word_text;
+            } else {
+                document.getElementById('word-display').innerText = "Aucun mot trouvé (No words found)";
+            }
+        }
+
+        async function logout() {
+            await supabase.auth.signOut();
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('app-screen').classList.add('hidden');
+            document.getElementById('access-code').value = '';
+        }
+    </script>
 </body>
 </html>
