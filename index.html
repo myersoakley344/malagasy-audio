@@ -23,7 +23,8 @@
 
 <div id="login-screen">
     <h2>Entrez votre code d'accès</h2>
-    <input type="text" id="access-code" placeholder="Code">
+    <!-- Added autocapitalize="none" to stop mobile keyboards from capitalizing -->
+    <input type="text" id="access-code" placeholder="Code" autocapitalize="none">
     <button class="btn-blue" onclick="login()">Valider</button>
     <div id="error-msg" class="hidden" style="color:red;"></div>
 </div>
@@ -68,7 +69,9 @@ let audioChunks = [];
 let recordings = { slow: null, natural: null };
 
 async function login() {
-    const code = document.getElementById('access-code').value.trim();
+    // FIX: Force to lowercase so Auto-Capitalize on phones doesn't break passwords
+    const code = document.getElementById('access-code').value.trim().toLowerCase();
+
     const { data, error } = await supabaseClient.auth.signInWithPassword({
         email: code + "@malagasy.local",
         password: code
@@ -86,10 +89,8 @@ async function login() {
 }
 
 async function fetchNextWord() {
-    // 1. Get all words from the dictionary
     const { data: allWords } = await supabaseClient.from('words').select('id, word_text').order('id', { ascending: true });
 
-    // 2. Get all word IDs this specific user has ALREADY recorded
     const { data: recordedData } = await supabaseClient.from('user_recordings').select('word_id').eq('speaker_id', currentUser.id);
 
     let recordedWordIds = [];
@@ -97,11 +98,9 @@ async function fetchNextWord() {
         recordedWordIds = recordedData.map(r => r.word_id);
     }
 
-    // 3. Find the first word they haven't recorded yet
     currentWordRow = allWords.find(word => !recordedWordIds.includes(word.id));
 
     if (!currentWordRow) {
-        // No words left for this speaker!
         document.getElementById('app-screen').classList.add('hidden');
         document.getElementById('done-screen').classList.remove('hidden');
         return;
@@ -109,14 +108,13 @@ async function fetchNextWord() {
 
     document.getElementById('word-display').innerText = currentWordRow.word_text;
 
-    // Reset UI for the new word
     recordings = { slow: null, natural: null };
     document.getElementById('btn-submit').classList.add('hidden');
     ['slow', 'natural'].forEach(type => {
         document.getElementById(`audio-${type}`).classList.add('hidden');
         document.getElementById(`btn-record-${type}`).classList.remove('hidden');
         document.getElementById(`btn-stop-${type}`).classList.add('hidden');
-        document.getElementById(`btn-record-${type}`).innerText = "⏺ Enregistrer"; // reset button text
+        document.getElementById(`btn-record-${type}`).innerText = "⏺ Enregistrer"; 
     });
 }
 
@@ -160,7 +158,6 @@ async function submitRecordings() {
     document.getElementById('btn-submit').classList.add('hidden');
 
     try {
-        // Filenames now include the user's ID so they don't overwrite each other!
         const slowName = `${currentUser.id}_word_${currentWordRow.id}_slow.webm`;
         const natName = `${currentUser.id}_word_${currentWordRow.id}_natural.webm`;
 
@@ -170,7 +167,6 @@ async function submitRecordings() {
         const slowUrl = supabaseClient.storage.from('recordings').getPublicUrl(slowName).data.publicUrl;
         const natUrl = supabaseClient.storage.from('recordings').getPublicUrl(natName).data.publicUrl;
 
-        // Save progress to the new user_recordings table
         await supabaseClient.from('user_recordings').insert({
             word_id: currentWordRow.id,
             speaker_id: currentUser.id,
@@ -178,7 +174,6 @@ async function submitRecordings() {
             audio_natural: natUrl
         });
 
-        // Load next word
         fetchNextWord();
         status.innerText = "";
 
