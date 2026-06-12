@@ -191,8 +191,15 @@ function setupSection(type, savedUrl) {
 }
 
 async function startRecording(type) {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorder = new MediaRecorder(stream);
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+    audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+    } 
+});
+// Ask for high-quality 128kbps audio
+mediaRecorder = new MediaRecorder(stream, { audioBitsPerSecond: 128000 });
     audioChunks = [];
 
     mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
