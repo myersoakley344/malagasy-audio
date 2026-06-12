@@ -29,7 +29,7 @@
 </div>
 
 <div id="app-screen" class="hidden">
-    <button onclick="logout()" class="btn-gray">Se déconnecter</button>
+    <button onclick="logout()" class="btn-gray">Se déconnecter (Logout)</button>
     <h3>Mot à enregistrer :</h3>
     <div id="word-display" class="word-display">...</div>
 
@@ -53,6 +53,7 @@
 
 <div id="done-screen" class="hidden">
     <h2>Félicitations ! 🎉</h2>
+    <p>Vous avez terminé tous les mots.</p>
 </div>
 
 <script>
@@ -60,6 +61,7 @@ const SUPABASE_URL = 'https://coaiznrxtpdqatvfbsyi.supabase.co';
 const SUPABASE_KEY = 'YOUR-ANON-KEY';
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+let currentUser = null;
 let currentWordRow = null;
 let mediaRecorder = null;
 let audioChunks = [];
@@ -67,7 +69,7 @@ let recordings = { slow: null, natural: null };
 
 async function login() {
     const code = document.getElementById('access-code').value.trim();
-    const { error } = await supabaseClient.auth.signInWithPassword({
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
         email: code + "@malagasy.local",
         password: code
     });
@@ -76,6 +78,7 @@ async function login() {
         document.getElementById('error-msg').innerText = "Code incorrect";
         document.getElementById('error-msg').classList.remove('hidden');
     } else {
+        currentUser = data.user;
         document.getElementById('login-screen').classList.add('hidden');
         document.getElementById('app-screen').classList.remove('hidden');
         fetchNextWord();
@@ -83,22 +86,33 @@ async function login() {
 }
 
 async function fetchNextWord() {
-    const { data } = await supabaseClient
-        .from('words')
-        .select('*')
-        .eq('is_completed', false)
-        .limit(1);
+    // 1. Get all words from the dictionary
+    const { data: allWords } = await supabaseClient.from('words').select('id, word_text').order('id', { ascending: true });
 
-    if (data.length === 0) {
+    // 2. Get all word IDs this specific user has ALREADY recorded
+    const { data: recordedData } = await supabaseClient.from('user_recordings').select('word_id').eq('speaker_id', currentUser.id);
+    const recordedWordIds = recordedData.map(r => r.word_id);
+
+    // 3. Find the first word they haven't recorded yet
+    currentWordRow = allWords.find(word => !recordedWordIds.includes(word.id));
+
+    if (!currentWordRow) {
+        // No words left for this speaker!
         document.getElementById('app-screen').classList.add('hidden');
         document.getElementById('done-screen').classList.remove('hidden');
         return;
     }
 
-    currentWordRow = data[0];
     document.getElementById('word-display').innerText = currentWordRow.word_text;
+
+    // Reset UI for the new word
     recordings = { slow: null, natural: null };
     document.getElementById('btn-submit').classList.add('hidden');
+    ['slow', 'natural'].forEach(type => {
+        document.getElementById(`audio-${type}`).classList.add('hidden');
+        document.getElementById(`btn-record-${type}`).classList.remove('hidden');
+        document.getElementById(`btn-stop-${type}`).classList.add('hidden');
+    });
 }
 
 async function startRecording(type) {
@@ -132,32 +146,32 @@ function stopRecording(type) {
     mediaRecorder.stop();
     document.getElementById(`btn-stop-${type}`).classList.add('hidden');
     document.getElementById(`btn-record-${type}`).classList.remove('hidden');
+    document.getElementById(`btn-record-${type}`).innerText = "🔄 Re-enregistrer";
 }
 
 async function submitRecordings() {
     const status = document.getElementById('upload-status');
     status.innerText = "Envoi...";
+    document.getElementById('btn-submit').classList.add('hidden');
 
     try {
-        const slowName = `word_${currentWordRow.id}_slow.webm`;
-        const natName = `word_${currentWordRow.id}_natural.webm`;
+        // Filenames now include the user's ID so they don't overwrite each other!
+        const slowName = `${currentUser.id}_word_${currentWordRow.id}_slow.webm`;
+        const natName = `${currentUser.id}_word_${currentWordRow.id}_natural.webm`;
 
-        await supabaseClient.storage.from('recordings')
-            .upload(slowName, recordings.slow, { upsert: true });
-
-        await supabaseClient.storage.from('recordings')
-            .upload(natName, recordings.natural, { upsert: true });
+        await supabaseClient.storage.from('recordings').upload(slowName, recordings.slow, { upsert: true });
+        await supabaseClient.storage.from('recordings').upload(natName, recordings.natural, { upsert: true });
 
         const slowUrl = supabaseClient.storage.from('recordings').getPublicUrl(slowName).data.publicUrl;
         const natUrl = supabaseClient.storage.from('recordings').getPublicUrl(natName).data.publicUrl;
 
-        await supabaseClient.from('words')
-            .update({
-                audio_slow: slowUrl,
-                audio_natural: natUrl,
-                is_completed: true
-            })
-            .eq('id', currentWordRow.id);
+        // Save progress to the new user_recordings table
+        await supabaseClient.from('user_recordings').insert({
+            word_id: currentWordRow.id,
+            speaker_id: currentUser.id,
+            audio_slow: slowUrl,
+            audio_natural: natUrl
+        });
 
         fetchNextWord();
         status.innerText = "";
@@ -165,6 +179,7 @@ async function submitRecordings() {
     } catch (e) {
         console.error(e);
         status.innerText = "Erreur upload";
+        document.getElementById('btn-submit').classList.remove('hidden');
     }
 }
 
