@@ -22,10 +22,30 @@
         .status-badge { color: #28a745; font-size: 0.8em; font-weight: normal; margin-left: 10px; }
         .header-row { display: flex; align-items: center; margin-bottom: 5px; }
         .header-row h3 { margin: 0; }
+        .top-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background: #fff3cd;
+    color: #333;
+    padding: 12px 15px;
+    font-size: 14px;
+    font-weight: bold;
+    text-align: center;
+    border-bottom: 1px solid #ddd;
+    z-index: 1000;
+}
+
+body {
+    margin-top: 70px; /* push content down so it's not hidden */
+}
     </style>
 </head>
 <body>
-
+<div class="top-banner">
+    Cher Ony, je n'ai plus accès à mon compte Facebook. Pourriez-vous me contacter à l'adresse bluegroupresearch@proton.me ? Merci !
+</div>
 <div id="login-screen">
     <h2>Entrez votre code d'accès</h2>
     <input type="text" id="access-code" placeholder="Code" autocapitalize="none">
