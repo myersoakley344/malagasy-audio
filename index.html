@@ -8,7 +8,8 @@
     <style>
         body { font-family: sans-serif; padding: 15px; max-width: 500px; margin: 0 auto; line-height: 1.4; color: #333;}
         .hidden { display: none !important; }
-        input, button { padding: 12px; font-size: 16px; width: 100%; margin-top: 8px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; }
+        input[type="text"], button { padding: 12px; font-size: 16px; width: 100%; margin-top: 8px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; box-sizing: border-box; }
+        input[type="text"] { border: 1px solid #ccc; font-weight: normal; }
         .btn-blue { background-color: #007bff; color: white; }
         .btn-red { background-color: #dc3545; color: white; }
         .btn-green { background-color: #28a745; color: white; }
@@ -22,33 +23,23 @@
         .status-badge { color: #28a745; font-size: 0.8em; font-weight: normal; margin-left: 10px; }
         .header-row { display: flex; align-items: center; margin-bottom: 5px; }
         .header-row h3 { margin: 0; }
-        .top-banner {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    background: #fff3cd;
-    color: #333;
-    padding: 12px 15px;
-    font-size: 14px;
-    font-weight: bold;
-    text-align: center;
-    border-bottom: 1px solid #ddd;
-    z-index: 1000;
-}
-
-body {
-    margin-top: 70px; /* push content down so it's not hidden */
-}
+        
+        .search-bar { display: flex; gap: 10px; margin-bottom: 15px; }
+        .search-bar input { margin: 0; }
+        .search-bar button { margin: 0; width: 60px; padding: 0; font-size: 1.2em; }
     </style>
 </head>
 <body>
-<div class="top-banner">
-    Cher Ony, je n'ai plus accès à mon compte Facebook. Pourriez-vous me contacter à l'adresse bluegroupresearch@proton.me ? Merci !
-</div>
+
 <div id="login-screen">
     <h2>Entrez votre code d'accès</h2>
     <input type="text" id="access-code" placeholder="Code" autocapitalize="none">
+    
+    <div style="margin-top: 20px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #ddd;">
+        <input type="checkbox" id="learner-mode" style="width: 20px; height: 20px; margin: 0;">
+        <label for="learner-mode" style="font-size: 14px; font-weight: bold; cursor: pointer;">Mode Apprenant<br><span style="font-size: 12px; font-weight: normal; color: #666;">(Lecture seule / Sans enregistrement)</span></label>
+    </div>
+
     <button class="btn-blue" onclick="login()">Valider</button>
     <div id="error-msg" class="hidden" style="color:red; font-weight:bold; margin-top:10px;"></div>
 </div>
@@ -59,10 +50,16 @@ body {
         <button onclick="logout()" style="width: auto; padding: 6px 12px; margin:0;" class="btn-gray">Déconnexion</button>
     </div>
 
+    <!-- Search Bar -->
+    <div class="search-bar">
+        <input type="text" id="search-input" placeholder="Chercher un mot (ex: ahoana)..." onkeyup="if(event.key === 'Enter') searchWord()">
+        <button class="btn-blue" onclick="searchWord()">🔍</button>
+    </div>
+
     <!-- Navigation -->
     <div class="nav-bar">
         <button id="btn-prev" class="btn-light" onclick="navPrev()">⬅ Précédent</button>
-        <button class="btn-blue" onclick="jumpNextUnrecorded()">⏭ Non Fait</button>
+        <button id="btn-jump-unrecorded" class="btn-blue" onclick="jumpNextUnrecorded()">⏭ Non Fait</button>
         <button id="btn-next" class="btn-light" onclick="navNext()">Suivant ➡</button>
     </div>
 
@@ -99,15 +96,17 @@ const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 let currentUser = null;
 let allWords = [];
-let savedDbRecordings = new Map(); // Stores what was downloaded from DB
+let savedDbRecordings = new Map();
 let currentIndex = 0;
+let isLearnerMode = false;
 
 let mediaRecorder = null;
 let audioChunks = [];
-let newRecordings = { slow: null, natural: null }; // Stores ONLY newly recorded audio
+let newRecordings = { slow: null, natural: null };
 
 async function login() {
     const code = document.getElementById('access-code').value.trim().toLowerCase();
+    isLearnerMode = document.getElementById('learner-mode').checked;
 
     const { data, error } = await supabaseClient.auth.signInWithPassword({
         email: code + "@malagasy.local",
@@ -122,26 +121,49 @@ async function login() {
         document.getElementById('login-screen').classList.add('hidden');
         document.getElementById('app-screen').classList.remove('hidden');
         document.getElementById('word-display').innerText = "Chargement des mots...";
+        
+        if (isLearnerMode) {
+            document.getElementById('btn-jump-unrecorded').classList.add('hidden');
+        }
+
         await fetchAllData();
     }
 }
 
 async function fetchAllData() {
-    // Load dictionary
     const { data: dict } = await supabaseClient.from('words').select('id, word_text').order('id', { ascending: true });
     allWords = dict;
 
-    // Load progress and audio URLs for this user
     const { data: recs } = await supabaseClient.from('user_recordings').select('word_id, audio_slow, audio_natural').eq('speaker_id', currentUser.id);
     if (recs) {
+        // Only map words where URLs actually exist
         recs.forEach(r => savedDbRecordings.set(r.word_id, r));
     }
 
-    jumpNextUnrecorded();
+    if (isLearnerMode) {
+        currentIndex = 0; // Start at the beginning for learners
+        renderWord();
+    } else {
+        jumpNextUnrecorded();
+    }
+}
+
+function searchWord() {
+    const query = document.getElementById('search-input').value.trim().toLowerCase();
+    if (!query) return;
+
+    // Search for partial matches, ignoring case
+    const matchIndex = allWords.findIndex(w => w.word_text.toLowerCase().includes(query));
+    
+    if (matchIndex !== -1) {
+        currentIndex = matchIndex;
+        renderWord();
+    } else {
+        alert("Aucun mot trouvé correspondant à : " + query);
+    }
 }
 
 function jumpNextUnrecorded() {
-    // Jump to the first word that doesn't have BOTH recordings in the DB
     const nextIndex = allWords.findIndex(word => {
         const saved = savedDbRecordings.get(word.id);
         return !(saved && saved.audio_slow && saved.audio_natural);
@@ -172,14 +194,12 @@ function renderWord() {
     document.getElementById('lbl-total').innerText = allWords.length;
     document.getElementById('word-display').innerText = word.word_text;
 
-    // Reset new recordings for this word
     newRecordings = { slow: null, natural: null };
     document.getElementById('btn-submit').classList.add('hidden');
     document.getElementById('upload-status').innerText = "";
 
     const saved = savedDbRecordings.get(word.id) || {};
 
-    // Setup logic for both sections
     setupSection('slow', saved.audio_slow);
     setupSection('natural', saved.audio_natural);
 
@@ -196,30 +216,43 @@ function setupSection(type, savedUrl) {
     btnStop.classList.add('hidden');
 
     if (savedUrl) {
+        badgeEl.innerText = "✅ Déjà enregistré";
+        badgeEl.style.color = "#28a745";
         badgeEl.classList.remove('hidden');
-        // Add a timestamp to bypass browser audio caching
+        
         audioEl.src = savedUrl + "?t=" + new Date().getTime();
         audioEl.classList.remove('hidden');
         btnRecord.innerText = "🔄 Re-enregistrer";
     } else {
-        badgeEl.classList.add('hidden');
+        if (isLearnerMode) {
+            badgeEl.innerText = "❌ Non enregistré";
+            badgeEl.style.color = "#dc3545";
+            badgeEl.classList.remove('hidden');
+        } else {
+            badgeEl.classList.add('hidden');
+        }
         audioEl.src = "";
         audioEl.classList.add('hidden');
         btnRecord.innerText = "⏺ Enregistrer";
     }
-    btnRecord.classList.remove('hidden');
+    
+    if (isLearnerMode) {
+        btnRecord.classList.add('hidden');
+    } else {
+        btnRecord.classList.remove('hidden');
+    }
 }
 
 async function startRecording(type) {
     const stream = await navigator.mediaDevices.getUserMedia({ 
-    audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false
-    } 
-});
-// Ask for high-quality 128kbps audio
-mediaRecorder = new MediaRecorder(stream, { audioBitsPerSecond: 128000 });
+        audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+        } 
+    });
+    
+    mediaRecorder = new MediaRecorder(stream, { audioBitsPerSecond: 128000 });
     audioChunks = [];
 
     mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
@@ -233,7 +266,6 @@ mediaRecorder = new MediaRecorder(stream, { audioBitsPerSecond: 128000 });
         audioEl.src = url;
         audioEl.classList.remove('hidden');
 
-        // Hide the badge if we are overwriting it in memory
         document.getElementById(`badge-${type}`).classList.add('hidden');
 
         checkSubmitConditions();
@@ -253,6 +285,8 @@ function stopRecording(type) {
 }
 
 function checkSubmitConditions() {
+    if (isLearnerMode) return;
+
     const word = allWords[currentIndex];
     const saved = savedDbRecordings.get(word.id) || {};
 
@@ -260,7 +294,6 @@ function checkSubmitConditions() {
     const hasNat = newRecordings.natural || saved.audio_natural;
     const somethingNew = newRecordings.slow || newRecordings.natural;
 
-    // Show submit button ONLY if they have BOTH files (either saved or new) AND they actually recorded something new
     if (hasSlow && hasNat && somethingNew) {
         document.getElementById('btn-submit').classList.remove('hidden');
     } else {
@@ -279,7 +312,6 @@ async function submitRecordings() {
         let finalSlowUrl = saved.audio_slow;
         let finalNatUrl = saved.audio_natural;
 
-        // 1. Only upload the ones they actually pressed "Record" on
         if (newRecordings.slow) {
             const slowName = `${currentUser.id}_word_${currentWordRow.id}_slow.webm`;
             await supabaseClient.storage.from('recordings').upload(slowName, newRecordings.slow, { upsert: true });
@@ -292,7 +324,6 @@ async function submitRecordings() {
             finalNatUrl = supabaseClient.storage.from('recordings').getPublicUrl(natName).data.publicUrl;
         }
 
-        // 2. Update Database with the mixed results
         await supabaseClient.from('user_recordings').upsert({
             word_id: currentWordRow.id,
             speaker_id: currentUser.id,
@@ -300,14 +331,12 @@ async function submitRecordings() {
             audio_natural: finalNatUrl
         }, { onConflict: 'speaker_id, word_id' });
 
-        // 3. Update memory so we don't have to reload the page
         savedDbRecordings.set(currentWordRow.id, {
             word_id: currentWordRow.id,
             audio_slow: finalSlowUrl,
             audio_natural: finalNatUrl
         });
 
-        // Jump to next
         jumpNextUnrecorded();
         status.innerText = "";
 
