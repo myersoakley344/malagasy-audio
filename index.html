@@ -4,7 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Enregistrement Audio Malgache</title>
+    
+    <!-- Supabase and JSZip for downloading archives -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
     <style>
         body { font-family: sans-serif; padding: 15px; max-width: 500px; margin: 0 auto; line-height: 1.4; color: #333;}
         .hidden { display: none !important; }
@@ -65,7 +69,7 @@
 
     <div id="word-display" class="word-display">...</div>
 
-    <!-- Translation Block (Only visible in Learner Mode) -->
+    <!-- Translation Block -->
     <div id="translation-container" class="hidden" style="text-align: center; margin-bottom: 15px;">
         <button id="btn-reveal" class="btn-light" onclick="revealTranslation()" style="width: auto; padding: 8px 20px;">👁 Traduction</button>
         <div id="translation-text" class="translation-display hidden"></div>
@@ -93,6 +97,11 @@
 
     <button id="btn-submit" class="btn-green hidden" onclick="submitRecordings()">✅ Envoyer (Submit)</button>
     <div id="upload-status" style="margin-top: 10px; font-weight: bold; text-align: center;"></div>
+
+    <hr style="margin-top:30px; border: 0; border-top: 1px solid #ddd;">
+    
+    <!-- Download ZIP Button -->
+    <button id="btn-download-zip" class="btn-gray" onclick="downloadAllZip()" style="background-color: #343a40;">📦 Télécharger tout (ZIP)</button>
 </div>
 
 <script>
@@ -137,7 +146,6 @@ async function login() {
 }
 
 async function fetchAllData() {
-    // Notice the addition of 'german_meaning' to the select statement
     const { data: dict } = await supabaseClient.from('words').select('id, word_text, german_meaning').order('id', { ascending: true });
     allWords = dict;
 
@@ -192,12 +200,10 @@ function navNext() {
     if (currentIndex < allWords.length - 1) { currentIndex++; renderWord(); }
 }
 
-// Function to reveal the translation
 function revealTranslation() {
     const word = allWords[currentIndex];
     const transText = document.getElementById('translation-text');
     
-    // Check if the translation exists in the database
     if (word.german_meaning && word.german_meaning.trim() !== "") {
         transText.innerText = word.german_meaning;
     } else {
@@ -215,7 +221,6 @@ function renderWord() {
     document.getElementById('lbl-total').innerText = allWords.length;
     document.getElementById('word-display').innerText = word.word_text;
 
-    // Reset Translation UI
     if (isLearnerMode) {
         document.getElementById('translation-container').classList.remove('hidden');
         document.getElementById('btn-reveal').classList.remove('hidden');
@@ -275,11 +280,7 @@ function setupSection(type, savedUrl) {
 
 async function startRecording(type) {
     const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false
-        } 
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } 
     });
     
     mediaRecorder = new MediaRecorder(stream, { audioBitsPerSecond: 128000 });
@@ -297,7 +298,6 @@ async function startRecording(type) {
         audioEl.classList.remove('hidden');
 
         document.getElementById(`badge-${type}`).classList.add('hidden');
-
         checkSubmitConditions();
     };
 
@@ -375,6 +375,78 @@ async function submitRecordings() {
         status.innerText = "Erreur upload";
         document.getElementById('btn-submit').classList.remove('hidden');
     }
+}
+
+// ZIP DOWNLOAD LOGIC
+async function downloadAllZip() {
+    const btn = document.getElementById('btn-download-zip');
+    btn.disabled = true;
+
+    // To get everything, we will query user_recordings where speaker is current
+    const { data: recs } = await supabaseClient.from('user_recordings').select('word_id, audio_slow, audio_natural').eq('speaker_id', currentUser.id);
+
+    if (!recs || recs.length === 0) {
+        alert("Aucun enregistrement trouvé.");
+        btn.disabled = false;
+        return;
+    }
+
+    btn.innerText = "Préparation du ZIP... (0%)";
+    const zip = new JSZip();
+    
+    // Count total required files to show progress
+    const totalFiles = recs.filter(r => r.audio_slow).length + recs.filter(r => r.audio_natural).length;
+    let count = 0;
+
+    for (const r of recs) {
+        const wordObj = allWords.find(w => w.id === r.word_id);
+        if (!wordObj) continue;
+
+        // Clean up the Malagasy string so it's a valid computer filename
+        // Ex: "Manao ahoana?" -> "Manao_ahoana"
+        let cleanName = wordObj.word_text.replace(/[\s\?\.\!\,\:]+/g, '_').replace(/_+/g, '_').replace(/_$/, '');
+
+        // Download Slow
+        if (r.audio_slow) {
+            try {
+                const response = await fetch(r.audio_slow);
+                const blob = await response.blob();
+                zip.file(`${cleanName}_lent.webm`, blob);
+                count++;
+                btn.innerText = `Téléchargement... (${Math.round((count/totalFiles)*100)}%)`;
+            } catch(e) { console.error("Could not fetch", r.audio_slow); }
+        }
+
+        // Download Natural
+        if (r.audio_natural) {
+            try {
+                const response = await fetch(r.audio_natural);
+                const blob = await response.blob();
+                zip.file(`${cleanName}_naturel.webm`, blob);
+                count++;
+                btn.innerText = `Téléchargement... (${Math.round((count/totalFiles)*100)}%)`;
+            } catch(e) { console.error("Could not fetch", r.audio_natural); }
+        }
+    }
+
+    btn.innerText = "Génération du fichier ZIP...";
+    
+    // Create the ZIP in memory
+    const zipContent = await zip.generateAsync({ type: "blob" });
+    
+    // Trigger the save to the user's computer
+    const url = window.URL.createObjectURL(zipContent);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = `Enregistrements_Malgache.zip`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+
+    // Reset button
+    btn.innerText = "📦 Télécharger tout (ZIP)";
+    btn.disabled = false;
 }
 
 function logout() {
