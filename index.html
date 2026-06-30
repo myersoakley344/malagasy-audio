@@ -17,13 +17,13 @@
         .btn-light { background-color: #e2e6ea; color: #333; border: 1px solid #ccc; }
         .recording-section { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ddd; }
         .word-display { font-size: 2.2em; background: #eee; padding: 25px 15px; text-align: center; border-radius: 8px; margin: 10px 0; border: 2px solid #ddd; }
+        .translation-display { font-size: 1.5em; color: #555; text-align: center; margin-bottom: 15px; font-style: italic; }
         audio { width: 100%; margin-top: 10px; }
         .nav-bar { display: flex; justify-content: space-between; gap: 5px; margin-bottom: 10px; }
         .nav-bar button { padding: 10px; font-size: 14px; margin-top: 0; }
         .status-badge { color: #28a745; font-size: 0.8em; font-weight: normal; margin-left: 10px; }
         .header-row { display: flex; align-items: center; margin-bottom: 5px; }
         .header-row h3 { margin: 0; }
-        
         .search-bar { display: flex; gap: 10px; margin-bottom: 15px; }
         .search-bar input { margin: 0; }
         .search-bar button { margin: 0; width: 60px; padding: 0; font-size: 1.2em; }
@@ -64,6 +64,12 @@
     </div>
 
     <div id="word-display" class="word-display">...</div>
+
+    <!-- Translation Block (Only visible in Learner Mode) -->
+    <div id="translation-container" class="hidden" style="text-align: center; margin-bottom: 15px;">
+        <button id="btn-reveal" class="btn-light" onclick="revealTranslation()" style="width: auto; padding: 8px 20px;">👁 Traduction</button>
+        <div id="translation-text" class="translation-display hidden"></div>
+    </div>
 
     <div class="recording-section">
         <div class="header-row">
@@ -131,17 +137,17 @@ async function login() {
 }
 
 async function fetchAllData() {
-    const { data: dict } = await supabaseClient.from('words').select('id, word_text').order('id', { ascending: true });
+    // Notice the addition of 'german_meaning' to the select statement
+    const { data: dict } = await supabaseClient.from('words').select('id, word_text, german_meaning').order('id', { ascending: true });
     allWords = dict;
 
     const { data: recs } = await supabaseClient.from('user_recordings').select('word_id, audio_slow, audio_natural').eq('speaker_id', currentUser.id);
     if (recs) {
-        // Only map words where URLs actually exist
         recs.forEach(r => savedDbRecordings.set(r.word_id, r));
     }
 
     if (isLearnerMode) {
-        currentIndex = 0; // Start at the beginning for learners
+        currentIndex = 0; 
         renderWord();
     } else {
         jumpNextUnrecorded();
@@ -152,7 +158,6 @@ function searchWord() {
     const query = document.getElementById('search-input').value.trim().toLowerCase();
     if (!query) return;
 
-    // Search for partial matches, ignoring case
     const matchIndex = allWords.findIndex(w => w.word_text.toLowerCase().includes(query));
     
     if (matchIndex !== -1) {
@@ -187,12 +192,37 @@ function navNext() {
     if (currentIndex < allWords.length - 1) { currentIndex++; renderWord(); }
 }
 
+// Function to reveal the translation
+function revealTranslation() {
+    const word = allWords[currentIndex];
+    const transText = document.getElementById('translation-text');
+    
+    // Check if the translation exists in the database
+    if (word.german_meaning && word.german_meaning.trim() !== "") {
+        transText.innerText = word.german_meaning;
+    } else {
+        transText.innerText = "(Keine Übersetzung verfügbar)";
+    }
+
+    document.getElementById('btn-reveal').classList.add('hidden');
+    transText.classList.remove('hidden');
+}
+
 function renderWord() {
     const word = allWords[currentIndex];
 
     document.getElementById('lbl-current').innerText = currentIndex + 1;
     document.getElementById('lbl-total').innerText = allWords.length;
     document.getElementById('word-display').innerText = word.word_text;
+
+    // Reset Translation UI
+    if (isLearnerMode) {
+        document.getElementById('translation-container').classList.remove('hidden');
+        document.getElementById('btn-reveal').classList.remove('hidden');
+        document.getElementById('translation-text').classList.add('hidden');
+    } else {
+        document.getElementById('translation-container').classList.add('hidden');
+    }
 
     newRecordings = { slow: null, natural: null };
     document.getElementById('btn-submit').classList.add('hidden');
